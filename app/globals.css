@@ -2,17 +2,29 @@
 
 /* Dark theme with a green accent. Verdict colours live here so every component agrees. */
 :root {
-  --background: #0b0f0d;
-  --foreground: #e6ebe8;
-  --accent: #0f7a3d;
-  --allow: #22c55e;
-  --block: #ef4444;
-  --escalate: #f59e0b;
+  --background: #070b09;
+  --foreground: #e8eee9;
+  --panel: #0b110e;
+  --card: #101814;
+  --card-hover: #15201a;
+  --line: #1d2822;
+  --muted: #9aa8a0;
+  --faint: #75847c;
+  --accent: #22c55e;
+  --allow: #4ade80;
+  --block: #f87171;
+  --escalate: #fbbf24;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-card: var(--card);
+  --color-card-hover: var(--card-hover);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
   --color-allow: var(--allow);
   --color-block: var(--block);
@@ -22,12 +34,19 @@
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(900px 360px at 8% -8%, rgb(34 197 94 / 0.09), transparent 70%),
+    var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3a31 transparent;
 }

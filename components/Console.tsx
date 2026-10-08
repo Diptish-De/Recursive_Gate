@@ -1,19 +1,22 @@
 "use client";
 
+import { RotateCcw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import scenarios from "@/lib/scenarios.json";
-import type { Decision, PendingAction } from "@/lib/types";
+import type { Customer, Decision, PendingAction, Verdict } from "@/lib/types";
 import { Chat, type ChatEntry, type Scenario } from "./Chat";
+import { CustomerBar } from "./CustomerBar";
 import { formatCall } from "./format";
-import { ProofPanel } from "./ProofPanel";
+import { ProofPanel, type ProofTab } from "./ProofPanel";
+import { VERDICT } from "./verdict";
 
 type CustomerOption = { id: string; name: string };
+type ServerState = { audit: Decision[]; pending: PendingAction[]; customers: Customer[] };
 
 const postJson = (url: string, body?: unknown) =>
   fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) }).then((r) => r.json());
 
-const loadState = (): Promise<{ audit: Decision[]; pending: PendingAction[] }> =>
-  fetch("/api/state").then((r) => r.json());
+const loadState = (): Promise<ServerState> => fetch("/api/state").then((r) => r.json());
 
 // The whole demo screen: chat on the left, proof panel on the right.
 export function Console({ customers }: { customers: CustomerOption[] }) {
@@ -21,25 +24,18 @@ export function Console({ customers }: { customers: CustomerOption[] }) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [audit, setAudit] = useState<Decision[]>([]);
-  const [pending, setPending] = useState<PendingAction[]>([]);
+  const [server, setServer] = useState<ServerState>({ audit: [], pending: [], customers: [] });
+  const [tab, setTab] = useState<ProofTab>("proof");
+  const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
+  const [reviewing, setReviewing] = useState<string | null>(null);
 
   // The server's audit log is the single source of truth for the proof panel.
-  const refresh = useCallback(
-    () =>
-      loadState().then((s) => {
-        setAudit(s.audit);
-        setPending(s.pending);
-      }),
-    [],
-  );
+  const refresh = useCallback(() => loadState().then(setServer), []);
 
   useEffect(() => {
     let alive = true;
     loadState().then((s) => {
-      if (!alive) return;
-      setAudit(s.audit);
-      setPending(s.pending);
+      if (alive) setServer(s);
     });
     return () => {
       alive = false;
@@ -54,6 +50,13 @@ export function Console({ customers }: { customers: CustomerOption[] }) {
     setEntries([]);
   }
 
+  function showProof(id: string) {
+    setTab("proof");
+    const n = Date.now();
+    setFocus({ id, n });
+    setTimeout(() => setFocus((f) => (f?.n === n ? null : f)), 2000);
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
@@ -61,6 +64,7 @@ export function Console({ customers }: { customers: CustomerOption[] }) {
     setEntries(history);
     setInput("");
     setBusy(true);
+    setTab("proof");
     try {
       const messages = history.filter((e) => e.role !== "system").map(({ role, content }) => ({ role, content }));
       const data = await postJson("/api/chat", { customerId, messages });
@@ -68,7 +72,7 @@ export function Console({ customers }: { customers: CustomerOption[] }) {
         ...history,
         data.error
           ? { role: "system", content: data.error, tone: "error" }
-          : { role: "assistant", content: data.reply, claims: data.claims },
+          : { role: "assistant", content: data.reply, claims: data.claims, decisions: data.decisions, model: data.model },
       ]);
     } catch {
       setEntries([...history, { role: "system", content: "Network error. Is the server running?", tone: "error" }]);
@@ -79,14 +83,19 @@ export function Console({ customers }: { customers: CustomerOption[] }) {
   }
 
   async function review(pendingId: string, approve: boolean) {
-    const data = await postJson("/api/approve", { pendingId, approve });
-    if (data.error) {
-      setEntries((e) => [...e, { role: "system", content: data.error, tone: "error" }]);
-    } else if (data.pending.requesterId === customerId) {
-      const ok = data.decision.verdict === "ALLOW";
-      setEntries((e) => [...e, { role: "system", content: `${data.decision.note}: ${formatCall(data.decision)}`, tone: ok ? "ok" : "error" }]);
+    setReviewing(pendingId);
+    try {
+      const data = await postJson("/api/approve", { pendingId, approve });
+      if (data.error) {
+        setEntries((e) => [...e, { role: "system", content: data.error, tone: "error" }]);
+      } else if (data.pending.requesterId === customerId) {
+        const ok = data.decision.verdict === "ALLOW";
+        setEntries((e) => [...e, { role: "system", content: `${data.decision.note}: ${formatCall(data.decision)}`, tone: ok ? "ok" : "error" }]);
+      }
+    } finally {
+      setReviewing(null);
+      void refresh();
     }
-    void refresh();
   }
 
   async function reset() {
@@ -101,46 +110,81 @@ export function Console({ customers }: { customers: CustomerOption[] }) {
     setInput(s.message);
   }
 
+  const count = (v: Verdict) => server.audit.filter((d) => d.verdict === v).length;
+
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex flex-wrap items-center gap-4 border-b border-zinc-800 px-5 py-3">
-        <div>
-          <h1 className="text-lg font-semibold">
-            Recursive<span className="text-accent">Gate</span>
-          </h1>
-          <p className="text-xs text-zinc-500">The LLM proposes. The logic decides.</p>
+      <header className="flex items-center gap-4 border-b border-line bg-panel/80 px-5 py-3 backdrop-blur">
+        <div className="flex items-center gap-3">
+          <div className="grid size-10 place-items-center rounded-xl bg-linear-to-br from-emerald-400 to-emerald-700 text-white shadow-lg shadow-emerald-950/50">
+            <ShieldCheck className="size-5" />
+          </div>
+          <div>
+            <h1 className="text-lg leading-tight font-semibold tracking-tight">
+              Recursive<span className="text-accent">Gate</span>
+            </h1>
+            <p className="text-xs text-muted">The LLM proposes. The logic decides.</p>
+          </div>
         </div>
-        <label className="ml-auto flex items-center gap-2 text-sm text-zinc-400">
-          Logged in as
-          <select
-            value={customerId}
-            onChange={(e) => switchCustomer(e.target.value)}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-100"
-          >
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.id} · {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button onClick={reset} className="rounded border border-zinc-700 px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-800">
-          Reset demo
+
+        <div className="ml-auto hidden items-center gap-2 md:flex">
+          <Stat value={server.audit.length} label={server.audit.length === 1 ? "decision" : "decisions"} />
+          {(["ALLOW", "BLOCK", "ESCALATE"] as const).map((v) => {
+            const { Icon, text, stat } = VERDICT[v];
+            return <Stat key={v} value={count(v)} label={stat} icon={<Icon className={`size-4 ${text}`} />} />;
+          })}
+        </div>
+
+        <button
+          onClick={reset}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-muted transition-colors hover:bg-card hover:text-foreground md:ml-2"
+        >
+          <RotateCcw className="size-4" /> Reset demo
         </button>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[55fr_45fr]">
-        <Chat
-          entries={entries}
-          input={input}
-          busy={busy}
-          scenarios={scenarios}
-          onInput={setInput}
-          onSend={send}
-          onScenario={loadScenario}
+      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+        <section className="flex min-h-0 flex-col border-line lg:border-r">
+          <CustomerBar
+            options={customers}
+            customerId={customerId}
+            customer={server.customers.find((c) => c.id === customerId)}
+            onSwitch={switchCustomer}
+          />
+          <Chat
+            entries={entries}
+            input={input}
+            busy={busy}
+            customerName={names[customerId]}
+            scenarios={scenarios}
+            names={names}
+            onInput={setInput}
+            onSend={send}
+            onScenario={loadScenario}
+            onShowProof={showProof}
+          />
+        </section>
+        <ProofPanel
+          tab={tab}
+          onTab={setTab}
+          audit={server.audit}
+          pending={server.pending}
+          names={names}
+          focus={focus}
+          reviewing={reviewing}
+          onReview={review}
         />
-        <ProofPanel audit={audit} pending={pending} names={names} onReview={review} />
       </main>
     </div>
+  );
+}
+
+function Stat({ value, label, icon }: { value: number; label: string; icon?: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 py-1.5 text-sm">
+      {icon}
+      <span className="font-semibold tabular-nums">{value}</span>
+      <span className="text-muted">{label}</span>
+    </span>
   );
 }

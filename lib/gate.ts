@@ -1,6 +1,7 @@
 import { addPending, addRefund, changePayoutAccount, db, logDecision } from "./db";
 import { evaluate } from "./engine";
 import { loadFacts } from "./facts";
+import { R0 } from "./rules";
 import type { Decision, Facts, GatedTool, PendingAction, RuleResult } from "./types";
 
 // The interceptor. The agent's state-changing tools call gate() and nothing else,
@@ -22,7 +23,7 @@ const executors: Record<GatedTool, (f: Facts, args: GateArgs) => unknown> = {
 // R0 is checked before the rules: an action on an order that does not exist is never allowed.
 function missingOrder(tool: GatedTool, facts: Facts, args: GateArgs): RuleResult | null {
   if (tool !== "issue_refund" || facts.order) return null;
-  return { rule: "R0", pass: false, onFail: "BLOCK", detail: `order ${args.orderId ?? "(none)"} does not exist` };
+  return { rule: R0.id, pass: false, onFail: R0.onFail, detail: `order ${args.orderId ?? "(none)"} does not exist` };
 }
 
 export function gate(tool: GatedTool, requesterId: string, args: GateArgs): GateOutcome {

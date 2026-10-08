@@ -49,11 +49,13 @@ export type RuleResult = {
   detail: string; // human-readable line shown in the proof panel
 };
 
+// A rule declares what it is once; its check only answers "did it pass, and why".
 export type Rule = {
   id: string;
   appliesTo: (GatedTool | "all")[];
+  onFail: "BLOCK" | "ESCALATE";
   description: string;
-  check: (f: Facts) => RuleResult;
+  check: (f: Facts) => { pass: boolean; detail: string };
 };
 
 // One gate decision: what the agent asked for, the verdict, and the proof.
